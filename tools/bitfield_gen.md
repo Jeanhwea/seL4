@@ -45,7 +45,7 @@ block VMFault {
 
 and generates a C struct with constructor and getter/setter functions with
 call-by-value and call-by-pointer semantics. It also, separately, generates a
-corresponding data type definition in Isabelle HOL with corresponding functions
+corresponding data type definition in Isabelle/HOL with corresponding functions
 in HOL for that data type, as well as proofs that the generated C code correctly
 implements these functions. This includes absence of undefined behaviour in C.
 
@@ -78,9 +78,9 @@ block VMFault {
 ```
 
 This will generate a type `VMFault_t` in C. Assuming that the word size of the
-underlying architecture is 32 bits, the `VMFault_t` type above will have a size
-of two machine words. The sizes of the content and padding fields in a block
-must add up to a multiple of the machine word size.
+underlying architecture is 32 bits, this `VMFault_t` type will have a size of
+two machine words. The sizes of the content and padding fields in a block must
+add up to a multiple of the machine word size.
 
 The bits in the block are laid out in memory in the order they are mentioned in
 the specification. That is, the left-most 32 bits (i.e. bits 63 to 32) of
@@ -164,6 +164,12 @@ void VMFault_set_seL4_FaultType(VMFault_t *vm_fault, uint32_t seL4_FaultType);
 ```
 
 These are neither `PURE` nor `CONST`, but still declared as `static inline`.
+
+> Note that the generator has a command line option `--prune` to skip functions
+that are not used, and the seL4 build system makes use of that option. That
+means, not necessarily all of the combinations above will appear in the
+generated files for seL4, only the ones that are actually used in the rest of
+the code.
 
 ### Field High
 
@@ -286,7 +292,7 @@ tagged_union cap cap_type {
 }
 ```
 
-Note that both of the block declarations for `null_cap` and `object_cap` contain
+> Note that both of the block declarations for `null_cap` and `object_cap` contain
 a field with the name `cap_type` at the same bit position with the same size,
 and that all blocks have the same size. We will later relax the size of the tag
 field, but the tool does require all blocks in a tagged union to be of the same
@@ -347,7 +353,7 @@ The getter names are constructed as `<union>_<block>_get_<field>`. Setters and
 pointer versions have names with `set`, `ptr_get`, and `ptr_set` respectively.
 All functions for the tagged union `cap` will start with `cap_`.
 
-It is a runtime error to use a getter or setter function on the wrong block
+> It is a runtime error to use a getter or setter function on the wrong block
 variant. That means it is the caller's responsibility to know or check which
 variant a value of `cap_t` represents before using e.g.
 `cap_object_cap_get_ref()` on it. The tool generates `assert` statements in the
@@ -463,8 +469,8 @@ tag, no matter how many other tag sizes are declared.
 The tag mask value declared for each alternative in the tagged union must fit
 the mask for the size of the tag field in the block. Remember that with `mask 4
  0x0e` the `0x0e` bit pattern means that size 4 does *not* apply, and instead
-the next larger size applies. So in the example, because `content_cap` has a
-4-bit tag field, `content_cap` must have a tag value where the bits `0x0e` are
+the next larger size applies. So in the example, because `object_cap` has a
+4-bit tag field, `object_cap` must have a tag value where the bits `0x0e` are
 not all set (e.g. 1 is a legal value). Conversely, `null_cap` has an 8-bit tag,
 and so at least the bits `0x0e` must all be set in the tag value (e.g. 14 or 15
 works, as does 255, but not 1).
@@ -474,7 +480,7 @@ for any particular tagged union.
 
 ### Raw Value Access
 
-The C representation of blocks, wether in a tagged union or not, is a struct
+The C representation of blocks, whether in a tagged union or not, is a struct
 containing an array of the architecture word type (`uint32` or `uint64`) of the
 length computed from the number and width of fields in the block. Given that the
 memory layout is fully specified it is possible to operate on these raw values
@@ -503,14 +509,17 @@ The tool supports architectures with 32 and 64 bit word sizes. The command
 base 32
 ```
 
-selects a 32 bit native word size.
+selects a 32 bit native word size. The declaration covers all subsequent blocks
+and unions in the specification. It is possible to give multiple declarations,
+each covering the subsequent blocks and unions, but it rarely makes sense to
+pick any other value than the word size of the architecture.
 
 Many 64 bit architectures have the concept of canonical pointers where not all
 64 bits of the available space are usable for pointers, but only for example 48
-bits. In this setting a pointer value would canonical if and only if all top
+bits. In this setting a pointer value would be canonical if and only if all top
 bits are set when bit 47 (counting from 0) is set. This is equivalent to sign
-extension, i.e. treating bit 47 as the sign bit and extend that sign bit up to
-bit 63.
+extension, i.e. treating bit 47 as the sign bit and extending that sign bit up
+to bit 63.
 
 A potential use for this is for kernel pointers to always have bit 47 set (and
 all bits above) and for user pointers to always have bit 47 unset (and all bits
@@ -535,16 +544,23 @@ base 64(48,0)
 means word size is 64, pointers are at most 48 bits, and no sign extension. This
 is currently equivalent to just `base 64`.
 
+It may make sense to use the `base` command multiple times for the sign
+extension case. For instance, if the intention is to usually store pointers on
+x64, one would declare `base 64(48,1)`, but if there is a specific block that
+wants to not store a pointer, but some other value as `field_high`, one could
+declare `base 64` just before and `base 64(48,1)` again just after that block.
+
+
 ## Syntax Reference
 
 ### Lexical Structure
 
 The generator distinguishes identifiers, integer literals, comments, white
 space, keywords, and operators. Keywords and operators are shown inline in the
-grammar in the next section. The rest are define below.
+grammar in the next section. The rest are defined below.
 
-A multi-letter ident must start with a letter or underscore, followed by
-letters, underscores or numbers. A one-letter ident must consist of one
+A multi-character ident must start with a letter or underscore, followed by
+letters, underscores or numbers. A one-character ident must consist of one
 letter. Letters are Latin letters `[a-z]` and `[A-Z]`, digits are `[0-9]`.
 
 ```bnf
@@ -601,15 +617,13 @@ tags ::= ( "tag" IDENT tag_value )*
 tag_value ::= INTLIT | "(" INTLIT ( "," INTLIT )* ")"
 ```
 
-The specification is not sensitive to reordering of blocks and unions, that is,
-forward references to names that are declared later in the file are allowed.
+Forward references to names that are declared later in the file are allowed.
 
 ### Restrictions
 
 The following restrictions are not represented by the grammar in the previous
 section, but will be checked by the generator.
 
-- there must be only one `base` declaration per spec
 - the canonical bit must be smaller than the `base` size
 - field sizes must not be larger than the `base` size
 - the field sizes in a block must add up to multiples of the `base` size
@@ -645,12 +659,12 @@ interface that the C verification uses when it encounters bitfield functions. If
 the generated specifications are trivial, not useful, wrong, or do not express
 the behaviour of the generated C (e.g. if the generated correctness proof was
 trivial), these proofs could not succeed, because the specification would then
-not provide the need semantics of the code (e.g. that loading a value after
+not provide the needed semantics of the code (e.g. that loading a value after
 storing it does not lose information). If the specification provides strong
 enough properties to make the rest of the C verification succeed, we know that
 the specification is strong enough for our needs, even though it might still be
-missing additional facts or properties the generated C code might have. This is
-sufficient for strong functional correctness.
+missing additional facts or properties that the generated C code might have.
+This is sufficient for strong functional correctness.
 
 ## Limitations
 
